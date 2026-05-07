@@ -201,14 +201,21 @@ class CallCSAgentInput(BaseModel):
         default=None,
         description=(
             "CS 에이전트가 바로 실행해도 되는 read-only 도구 힌트. "
-            "확실하지 않으면 null로 두세요."
+            "확실하지 않으면 null로 두세요. "
+            "**tool_hint를 지정하면 tool_args도 함께 채우세요. null로 두지 마세요.**"
         ),
     )
     tool_args: dict | None = Field(
         default=None,
         description=(
-            "tool_hint에 전달할 도구 인자. 도구 인자를 확실히 구성할 수 있을 때만 제공하세요. "
-            "예: search_products는 {'query':'딸기','check_stock':true,'limit':5}."
+            "tool_hint와 함께 사용할 도구 인자. "
+            "**tool_hint를 설정한 경우 반드시 채우세요 (null 금지).** "
+            "도구별 필수 키:\n"
+            "- search_policy: {\"query\":<사용자 질문 전체>, \"policy_type\":\"delivery|return|payment|membership|quality|service|all\"}\n"
+            "- search_faq: {\"query\":<질문>, \"top_k\":3}\n"
+            "- search_products: {\"query\":<상품명/카테고리>, \"check_stock\":true, \"limit\":5}\n"
+            "- get_product_detail: {\"product_name\":<상품명>} 또는 {\"product_id\":<int>}\n"
+            "- get_order_status: {} 또는 {\"order_id\":<int>}"
         ),
     )
 

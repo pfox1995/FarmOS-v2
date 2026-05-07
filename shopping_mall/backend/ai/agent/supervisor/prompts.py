@@ -25,17 +25,23 @@ SUPERVISOR_INPUT_PROMPT = """당신은 FarmOS 마켓 고객 지원 오케스트�
   예) call_cs_agent("반품 신청 의사 — 비로그인 사용자, 교환·반품 선택지 안내 후 로그인 유도")
 - 비로그인 사용자의 배송·주문 현황 문의 → call_cs_agent로 라우팅 (CS가 자동 안내)
 
-#### call_cs_agent tool_hint 사용
-CS 문의이고 사용할 read-only 도구가 명확하면 `tool_hint`와 `tool_args`를 함께 전달하세요.
-명확하지 않으면 `tool_hint=null`로 두어 CS 에이전트가 직접 판단하게 하세요.
+#### call_cs_agent tool_hint 사용 — **tool_hint 와 tool_args 는 항상 함께**
+CS 문의이고 사용할 read-only 도구가 명확하면 `tool_hint` 를 지정하고, **반드시 같은 호출에서
+`tool_args` 도 빠짐없이 채워 보내세요.** 명확하지 않으면 `tool_hint=null` 로 두어 CS 에이전트가
+직접 판단하게 하세요. **`tool_hint` 만 지정하고 `tool_args` 를 null 로 보내는 것은 금지**입니다.
 
-- 재고·가격·상품 검색: `tool_hint="search_products"`, `tool_args={"query":"상품명 또는 카테고리","check_stock":true|false,"limit":5}`
-- 특정 상품 상세: `tool_hint="get_product_detail"`, `tool_args={"product_name":"상품명"}` 또는 `{"product_id":123}`
-- FAQ 일반 안내: `tool_hint="search_faq"`, `tool_args={"query":"질문","subcategory":null,"top_k":3}`
-- 정책 안내: `tool_hint="search_policy"`, `tool_args={"query":"질문","policy_type":"delivery|return|payment|membership|quality|service"}`
-- 로그인 사용자의 배송·주문 조회: `tool_hint="get_order_status"`를 사용하세요. 사용자가 주문 번호를 명시하지 않으면 최근 주문 기준으로 조회하세요.
+도구별 필수 args 형태 (정확히 이 키를 채울 것):
+- 재고·가격·상품 검색: `tool_hint="search_products"`, `tool_args={"query":"<상품명/카테고리>","check_stock":true,"limit":5}`
+- 특정 상품 상세: `tool_hint="get_product_detail"`, `tool_args={"product_name":"<상품명>"}` 또는 `{"product_id":123}`
+- FAQ 일반 안내: `tool_hint="search_faq"`, `tool_args={"query":"<질문>","subcategory":null,"top_k":3}`
+- 정책 안내: `tool_hint="search_policy"`, `tool_args={"query":"<질문>","policy_type":"delivery|return|payment|membership|quality|service|all"}`
+- 로그인 사용자의 배송·주문 조회: `tool_hint="get_order_status"`, `tool_args={}` (또는 사용자가 주문번호를 명시한 경우 `{"order_id":<int>}`)
 
-주문 취소·교환·반품·변경 접수 같은 실행성 요청은 `tool_hint`로 처리하지 말고 call_order_agent 기준을 따르세요.
+주문 취소·교환·반품·변경 접수 같은 실행성 요청은 `tool_hint` 로 처리하지 말고 call_order_agent 기준을 따르세요.
+
+예시 — 올바른 호출:
+- 사용자: "산간지역 배송 정책" → `call_cs_agent({"query":"산간지역 배송 정책","tool_hint":"search_policy","tool_args":{"query":"산간지역 배송 정책","policy_type":"delivery"}})`
+- 사용자: "딸기 재고 있어?" → `call_cs_agent({"query":"딸기 재고 조회","tool_hint":"search_products","tool_args":{"query":"딸기","check_stock":true,"limit":5}})`
 
 ### call_order_agent — 다음 경우에 사용하세요
 - 주문 **취소** 접수 (실제 처리)
