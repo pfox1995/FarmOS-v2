@@ -244,11 +244,17 @@ class SupervisorExecutor:
         self.order_graph = order_graph
         self.max_iterations = max_iterations
 
-        # model_config의 title이 LangChain에서 도구 이름으로 사용됨
+        # model_config의 title이 LangChain에서 도구 이름으로 사용됨.
+        # tool_choice="any" — Supervisor 의 역할은 라우팅 전용이라 절대 직접 답을
+        # 작성해서는 안 된다. gpt-5-nano 등 reasoning 모델이 tool call 대신 plan
+        # 텍스트("CS 에이전트 호출하겠습니다... tool_hint=...")를 emit 하는 회귀를
+        # 막기 위해 강제. (LangChain "any" = OpenAI tool_choice="required" 와 동등)
         supervisor_tools = [CallCSAgentInput, CallOrderAgentInput]
-        primary_bound = primary.bind_tools(supervisor_tools)
+        primary_bound = primary.bind_tools(supervisor_tools, tool_choice="any")
         if fallback:
-            self._llm = primary_bound.with_fallbacks([fallback.bind_tools(supervisor_tools)])
+            self._llm = primary_bound.with_fallbacks(
+                [fallback.bind_tools(supervisor_tools, tool_choice="any")]
+            )
             self._output_llm = primary.with_fallbacks([fallback])
         else:
             self._llm = primary_bound
