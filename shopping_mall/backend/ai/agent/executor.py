@@ -155,6 +155,26 @@ _DISALLOWED_LEADING_TONE_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 
+# 사용자 메시지에서 "이건 분명히 도구가 필요하다" 를 추정하는 키워드 셋.
+# CS LLM 이 tool_calls 를 emit 하지 않고 free-text 사과만 낼 때 강제 재시도 트리거.
+# 인사/확인성 메시지(안녕/네/예/감사)는 포함하지 않아 그쪽 흐름은 영향 없음.
+_NEEDS_TOOL_KEYWORDS: tuple[str, ...] = (
+    "정책", "약관", "규정",
+    "배송", "택배", "송장", "출고", "도착", "지연",
+    "주문", "결제", "환불", "반품", "교환", "취소",
+    "상품", "재고", "가격", "할인", "쿠폰",
+    "회원", "등급", "포인트", "마일리지",
+    "보관", "신선", "품질", "유통기한",
+    "원산지", "인증", "친환경", "유기농",
+    "FAQ", "faq", "문의", "안내",
+)
+
+
+def _likely_needs_tool(user_message: str) -> bool:
+    text = user_message or ""
+    return any(kw in text for kw in _NEEDS_TOOL_KEYWORDS)
+
+
 def _is_empty_result(result: str) -> bool:
     normalized = re.sub(r"\s+", " ", result).strip()
     return any(p.search(normalized) for p in _EMPTY_RESULT_PATTERNS)
@@ -533,6 +553,20 @@ class AgentExecutor:
         except Exception as e:
             logger.error("[CS 에이전트] LLM 호출 오류 (도구 선택): %s", e)
             raise
+
+        # 도구 호출 없음 + 사용자 메시지가 도구가 필요한 키워드를 포함하면 강제 재시도.
+        # gpt-5-nano 등 reasoning 모델이 정책/주문/상품 질의에서도 tool_calls 를 emit
+        # 하지 않고 free-text 사과만 내놓는 회귀를 방어.
+        if not response.tool_calls and _likely_needs_tool(user_message):
+            logger.info("[CS 에이전트] tool_calls 누락 — tool_choice=any 로 1회 재시도")
+            try:
+                forced_llm = self.primary.bind_tools(tools, tool_choice="any")
+                response = await forced_llm.ainvoke(
+                    [SystemMessage(content=input_system)] + messages
+                )
+            except Exception as e:
+                logger.error("[CS 에이전트] 강제 tool_choice 재시도 실패: %s", e)
+                # 원래 응답 그대로 진행 (아래 fallback 으로)
 
         # 도구 호출 없음 → 인사말·확인 응답 등 직접 반환
         if not response.tool_calls:
