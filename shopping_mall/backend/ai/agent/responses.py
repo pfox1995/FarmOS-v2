@@ -58,7 +58,7 @@ SERVICE_TEMPORARY_ERROR = "현재 서비스에 일시적인 문제가 발생했�
 
 STOCK_QUERY_NEEDS_TARGET = (
     "재고를 확인할 상품명이나 카테고리를 알려주세요.\n"
-    "예: 딸기, 사과, 과일, 채소"
+    "예: 사과, 한라봉, 한우 등심, 과일, 채소"
 )
 
 # _parse_answer에서 응답이 MAX_ANSWER_LENGTH를 초과할 때 말미에 붙는 문구

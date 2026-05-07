@@ -175,6 +175,47 @@ def _likely_needs_tool(user_message: str) -> bool:
     return any(kw in text for kw in _NEEDS_TOOL_KEYWORDS)
 
 
+# tool_hint 별 default tool_args. provided dict 가 비거나 query 가 없을 때 user_message
+# 로 채워서 빈 query 호출로 RAG 가 0건을 반환하는 사고를 막는다.
+def _hydrate_tool_args(
+    tool_hint: str, provided: dict, user_message: str,
+) -> dict:
+    args: dict = dict(provided) if provided else {}
+    msg = (user_message or "").strip()
+
+    if tool_hint == "search_policy":
+        if not args.get("query"):
+            args["query"] = msg
+        if not args.get("policy_type"):
+            args["policy_type"] = "all"
+    elif tool_hint == "search_faq":
+        if not args.get("query"):
+            args["query"] = msg
+        # subcategory 는 LLM 이 의도적으로 null 로 둘 수 있어 강제하지 않음
+        if "top_k" not in args or not isinstance(args.get("top_k"), int):
+            args["top_k"] = 3
+    elif tool_hint == "search_products":
+        if not args.get("query"):
+            args["query"] = msg
+        if "limit" not in args or not isinstance(args.get("limit"), int):
+            args["limit"] = 5
+    elif tool_hint == "get_product_detail":
+        # product_id 가 있으면 그대로 둠; 없고 product_name 도 없으면 user_message 사용
+        if not args.get("product_id") and not args.get("product_name"):
+            args["product_name"] = msg
+    elif tool_hint == "get_order_status":
+        # 주문번호가 query 형태로 들어오면 정수 추출 시도; 실패해도 OK (최근 주문 fallback)
+        if "order_id" not in args:
+            for token in msg.replace("#", " ").split():
+                if token.isdigit():
+                    try:
+                        args["order_id"] = int(token)
+                    except ValueError:
+                        pass
+                    break
+    return args
+
+
 def _is_empty_result(result: str) -> bool:
     normalized = re.sub(r"\s+", " ", result).strip()
     return any(p.search(normalized) for p in _EMPTY_RESULT_PATTERNS)
@@ -445,7 +486,12 @@ class AgentExecutor:
         tool_args: dict | None,
     ) -> AgentResult:
         """Supervisor가 지정한 read-only 도구를 바로 실행해 도구 선택 LLM 호출을 생략."""
-        safe_args = tool_args if isinstance(tool_args, dict) else {}
+        # Supervisor 가 tool_args 를 빠뜨리거나 null 로 보낸 경우 user_message 기반
+        # 합리적 default 로 보강한다. (gpt-5-nano 등 reasoning 모델이 종종 args 를
+        # 누락한 채 tool_hint 만 전달하는 케이스 방어 — 이전에 tool 결과가 비어
+        # apology 만 나오던 회귀.)
+        provided = tool_args if isinstance(tool_args, dict) else {}
+        safe_args = _hydrate_tool_args(tool_hint, provided, user_message)
         tc = {"name": tool_hint, "args": safe_args, "id": f"hint-{tool_hint}"}
         guarded = _reject_cross_user_order_lookup(tc)
         if guarded is not None:
