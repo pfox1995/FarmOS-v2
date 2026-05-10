@@ -149,19 +149,47 @@ async def lifespan(app: FastAPI):
         from app.services.subsidy.tools import _get_rag
 
         rag = await _asyncio.to_thread(_get_rag)
-        if rag.count() == 0:
-            _log.info("공익직불 ChromaDB 비어있음 — 캐시된 Markdown 으로 자동 인덱싱 시작")
+
+        # Backend-aware doc count + warm-up.
+        # On the redis backend, `rag.count()` dispatches an async coroutine
+        # through `_run_async`, which deliberately refuses inside the FastAPI
+        # event loop (would corrupt the redis pool). Call the async API
+        # directly instead. The reranker + python-side BM25 are chroma-only
+        # paths — skipping them on redis saves ~5-20s of cold start and
+        # ~600MB of resident memory.
+        if settings.SUBSIDY_RAG_BACKEND == "redis":
+            from app.core.redis import init_redis
+            from app.services.subsidy.redis_index import doc_count as _redis_doc_count
+            await init_redis()
             try:
-                await _asyncio.to_thread(run_ingest_pipeline, False)
-            except FileNotFoundError as e:
-                _log.warning(f"자동 인덱싱 스킵 (Markdown 캐시 없음): {e}")
-            except Exception as e:
-                _log.error(f"자동 인덱싱 실패 — /subsidy/ask 는 빈 결과 반환: {e}", exc_info=True)
-        await _asyncio.to_thread(_get_reranker)
-        # Hybrid retrieval 의 sparse 절반 — BM25 인덱스를 미리 빌드해 첫 요청 지연 방지
-        if rag.count() > 0:
-            await _asyncio.to_thread(rag._ensure_bm25_built)
-        app.state.subsidy_rag_ready = rag.count() > 0
+                doc_n = await _redis_doc_count()
+            except Exception as exc:  # noqa: BLE001
+                _log.warning(f"redis_index.doc_count failed at boot: {exc}")
+                doc_n = 0
+            if doc_n == 0:
+                _log.info("Redis 공익직불 인덱스 비어있음 — 캐시된 Markdown 으로 자동 인덱싱 시작")
+                try:
+                    await _asyncio.to_thread(run_ingest_pipeline, False)
+                    doc_n = await _redis_doc_count()
+                except FileNotFoundError as e:
+                    _log.warning(f"자동 인덱싱 스킵 (Markdown 캐시 없음): {e}")
+                except Exception as e:
+                    _log.error(f"자동 인덱싱 실패 — /subsidy/ask 는 빈 결과 반환: {e}", exc_info=True)
+            app.state.subsidy_rag_ready = doc_n > 0
+        else:
+            if rag.count() == 0:
+                _log.info("공익직불 ChromaDB 비어있음 — 캐시된 Markdown 으로 자동 인덱싱 시작")
+                try:
+                    await _asyncio.to_thread(run_ingest_pipeline, False)
+                except FileNotFoundError as e:
+                    _log.warning(f"자동 인덱싱 스킵 (Markdown 캐시 없음): {e}")
+                except Exception as e:
+                    _log.error(f"자동 인덱싱 실패 — /subsidy/ask 는 빈 결과 반환: {e}", exc_info=True)
+            await _asyncio.to_thread(_get_reranker)
+            # Hybrid retrieval 의 sparse 절반 — BM25 인덱스를 미리 빌드해 첫 요청 지연 방지
+            if rag.count() > 0:
+                await _asyncio.to_thread(rag._ensure_bm25_built)
+            app.state.subsidy_rag_ready = rag.count() > 0
     except Exception as e:
         # UPSTAGE_API_KEY 미설정·네트워크 오류·모델 로드 실패 등 — 서버 기동은 계속
         _log.warning(f"공익직불 RAG 준비 실패 (/subsidy/ask 제한 동작): {e}")
